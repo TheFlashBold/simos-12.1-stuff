@@ -1,134 +1,198 @@
-# Patch FL_8V0906264E__0003.bin
+# Simos 12.1 Sample Mode Enabler
+This patch allows bypassing RSA signature verification on Simos 12.1 ECUs by enabling "Sample Mode" in CBOOT, which disables the cryptographic validation.
+
+## How It Works
+The patch has three key components:
+
+- Position: Places code at the beginning of ASW1 (0xC0000)
+- Entry Point: Modifies the ASW entry point to execute our patch first
+- Functionality: Loads CBOOT into RAM, patches it to enable Sample Mode, then executes it
+
+When the ECU boots, CBOOT will jump to our patch code instead of the normal ASW entry point. Our code:
+
+- Loads CBOOT into RAM at address 0xD0007000
+- Patches the Sample Mode check functions in RAM
+- Jumps to the patched CBOOT in RAM
+- If it returns, continues to the original ASW entry point
+
+## Sample Mode Check Functions
+The patch targets three critical functions in CBOOT that determine if an ECU is in "Sample Mode":
+
 ```
-< 000c0000: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0010: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0020: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0030: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0040: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0050: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0060: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0070: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0080: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c0090: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c00a0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c00b0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c00c0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c00d0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
-< 000c00e0: 0000 0000 0000 0000 0000 0000 0000 0000  ................
----
-> 000c0000: 9120 00c8 9100 004d d944 4010 d9cf 42ae  . .....M.D@...B.
-> 000c0010: 2d0f 0000 d9cf 662e 3b00 2041 2d0f 0000  -.....f.;. A-...
-> 000c0020: d9cf a45e 3b00 2041 2d0f 0000 d9cf 429e  ...^;. A-.....B.
-> 000c0030: 0d00 c004 9100 00fc d9ff 80c7 80f0 0d00  ................
-> 000c0040: 8004 cd40 e20f 0d00 c004 0d00 c004 d9cf  ...@............
-> 000c0050: 589e 2d0f 0000 9120 0028 4922 000a 9100  X.-.... .(I"....
-> 000c0060: 00fd d9ff 0007 9100 0050 d955 e0f1 0922  .........P.U..."
-> 000c0070: 0100 24f2 fc5d 9100 00fd d9ff 8040 49ff  ..$..].......@I.
-> 000c0080: 201a 49ff 0c0a 49ff 0e0a 8210 74f0 9100   .I...I.....t...
-> 000c0090: 00fd d9ff 8040 49ff 201a 49ff 0d0a 49ff  .....@I. .I...I.
-> 000c00a0: 0c0a 3b20 0a00 74f0 9100 00fd d9ff 8040  ..; ..t........@
-> 000c00b0: 49ff 201a 49ff 0e0a 49ff 080a 3b10 d000  I. .I...I...;...
-> 000c00c0: 74f0 3b00 2041 9100 00fd d9ff 0007 2d0f  t.;. A........-.
-> 000c00d0: 0000 91a0 01f8 d9ff 8000 d9ff 4000 d9ff  ............@...
-> 000c00e0: 00c0 49ff 002a 49ff 004a dc0f 0000 0000  ..I..*I..J......
-49185c49185
-< 000c0200: 80f1 1a80 700b 2e80 700b 2e80 700b 2e80  ....p...p...p...
----
-> 000c0200: 800c 0000 700b 2e80 700b 2e80 700b 2e80  ....p...p...p...
-49201c49201
-< 000c0300: 0000 0000 0b28 97db 0200 0000 0000 0c80  .....(..........
----
-> 000c0300: 0000 0000 b92a 3ae6 0200 0000 0000 0c80  .....*:.........
+Function		Memory Check	Required Value
+FUN_CBOOT__800226ce()	afe81f84	non-zero
+FUN_CBOOT__800226dc()	afe81e45	0xa2
+FUN_CBOOT__800226e8()	afe81e40	0xd01
 ```
 
-## CBOOT Sample mode
+When all three checks pass, CBOOT operates in Sample Mode, which disables signature verification.
+Applying the Patch
+
+### 1. Modify the ASW entry point
+Change the value at 0x800C0200 from 0x801AF180 to 0x800C0000:
+Copy800c0200: 80f1 1a80  →  800c 0000
+
+### 2. Add the patch code at 0x800C0000
+
 ```
-FUN_CBOOT__800226ce() - Reads from afe81f84, must be non-zero
-FUN_CBOOT__800226dc() - Reads from afe81e45, must be 0xa2
-FUN_CBOOT__800226e8() - Reads from afe81e40, must be 0xd01
+// Set up environment
+movh.a     a12, #0x8002       // CBOOT address: 0x80020000
+movh.a     a4, #0xd000        // Task context base address
+lea        a4, [a4]0x440      // Complete address: 0xd0000440
+lea        a15, [a12]-0x197e  // Calculate function address
+calli      a15                // Set task context
+
+// Configure timers with Programming Mode parameter
+lea        a15, [a12]-0x1b5a  // Timer setup function
+mov        d4, #0x1200        // Programming Mode parameter (0x1200)
+calli      a15                // Call timer setup
+
+// Reset peripherals 
+lea        a15, [a12]-0x169c  // Peripheral reset function
+mov        d4, #0x1200        // Programming Mode parameter
+calli      a15                // Call reset function
+
+// Enable ENDINIT (CPU protection)
+lea        a15, [a12]-0x19be  // ENABLE_ENDINIT function
+calli      a15                // Call function
+
+// Configure trap vectors
+isync                         // Instruction sync
+movh.a     a15, #0xc000       // Base address for trap vectors
+lea        a15, [a15]0x7b00   // Trap vector address: 0xc0007b00
+mov.d      d0, a15            // Put address in d0
+dsync                         // Data sync
+mtcr       #0xfe24, d0        // Set trap vector register
+isync                         
+isync
+
+// Disable ENDINIT (for memory operations)
+lea        a15, [a12]-0x19a8  // DISABLE_ENDINIT function
+calli      a15                // Call function
+
+// Copy CBOOT from flash to RAM
+movh.a     a2, #0x8002        // Source: 0x80020000 (CBOOT)
+lea        a2, [a2]0x0        // Complete source address
+movh.a     a15, #0xd000       // Destination base
+lea        a15, [a15]0x7000   // Complete destination: 0xd0007000
+movh.a     a5, #0x0           // Prepare for size
+lea        a5, [a5]0x1fe0     // Size: 0x1fe0 (CBOOT size)
+
+// Memory copy loop
+copy_loop:
+ld.b       d2, [a2+]0x1       // Load byte from flash
+st.b       [a15+], d2         // Store byte to RAM
+loop       a5, copy_loop      // Repeat until done
+
+// Patch first Sample Mode check (must return non-zero)
+movh.a     a15, #0xd000       // RAM base
+lea        a15, [a15]0x900    // Building address
+lea        a15, [a15]0x60     // Building address
+lea        a15, [a15]0xc      // Building address
+lea        a15, [a15]0xe      // Final: 0xd00096ce (function in RAM)
+mov        d0, #0x1           // Set to non-zero value
+st.w       [a15], d0          // Patch function
+
+// Patch second Sample Mode check (must return 0xa2)
+movh.a     a15, #0xd000       // RAM base
+lea        a15, [a15]0x900    // Building address
+lea        a15, [a15]0x60     // Building address
+lea        a15, [a15]0xd      // Building address
+lea        a15, [a15]0xc      // Final: 0xd00096dc (function in RAM)
+mov        d0, #0xa2          // Set to required value
+st.w       [a15], d0          // Patch function
+
+// Patch third Sample Mode check (must return 0xd01)
+movh.a     a15, #0xd000       // RAM base
+lea        a15, [a15]0x900    // Building address
+lea        a15, [a15]0x60     // Building address
+lea        a15, [a15]0xe      // Building address
+lea        a15, [a15]0x8      // Final: 0xd00096e8 (function in RAM)
+mov        d0, #0xd01         // Set to required value
+st.w       [a15], d0          // Patch function
+
+// Jump to patched CBOOT in RAM
+mov        d4, #0x1200        // Programming Mode parameter
+movh.a     a15, #0xd000       // RAM address base
+lea        a15, [a15]0x7000   // CBOOT in RAM: 0xd0007000
+calli      a15                // Jump to CBOOT in RAM
+
+// If CBOOT returns, continue to normal ASW execution
+movh.a     a15, #0x801a       // Original entry point high part
+lea        a15, [a15]0x800    // Building address
+lea        a15, [a15]0x400    // Building address
+lea        a15, [a15]0x300    // Building address
+lea        a15, [a15]0x80     // Building address
+lea        a15, [a15]0x100    // Final: 0x801af180 (original entry)
+ji         a15                // Jump to original ASW entry
 ```
 
-Place your patch at 0x800C0000
-Modify the value at 0x800C0200 to point to 0x800C0000 instead of 0x801AF180
-Your patch should end by jumping to 0x801AF180 to continue normal ASW execution
+### 3. Update the CRC checksum
+The ASW1 block requires valid CRC checksum. Change the value at 0xC0304:
 
-ASW1 CRC-Checksum
-`0xDB97280B`
+´´´
+0xC0304: 0b28 97db  →  b92a 3ae6
+´´´
 
-`crchack -x 00000000 -i 00000000 -w 32 -p 0x4c11db7 -b 0x304:0x308 ASW1_modified.bin 0xDB97280B > ASW1_patched.bin`
+You can use this Python script to calculate the correct CRC:
 
-Change ASW Entry
 ```
-     1::800c0200 00 00 0c 80     ddw        800C0000h
+import struct
+import binascii
+
+def crc32_fast(data, poly=0x4C11DB7, init=0, xorout=0):
+    # Create CRC32 table
+    table = []
+    for i in range(256):
+        c = i << 24
+        for j in range(8):
+            c = (c << 1) ^ poly if (c & 0x80000000) else c << 1
+        table.append(c & 0xFFFFFFFF)
+    
+    # Calculate CRC
+    crc = init
+    for byte in data:
+        crc = (crc << 8) ^ table[((crc >> 24) ^ byte) & 0xFF]
+        crc &= 0xFFFFFFFF
+    
+    return crc ^ xorout
+
+# Load modified binary and update checksum
+with open("modified_binary.bin", "rb") as f:
+    data = bytearray(f.read())
+
+# ASW1 starts at 0xC0000, checksum at 0xC0304
+checksum_location = 0xC0300 + 4
+checksum_areas = [(0xC0000, 0xC02FF), (0xC0800, 0x17F9FF)]
+
+checksum_data = bytearray()
+for start, end in checksum_areas:
+    checksum_data.extend(data[start:end+1])
+
+checksum = crc32_fast(checksum_data)
+data[checksum_location:checksum_location+4] = struct.pack("<I", checksum)
+
+with open("patched_binary.bin", "wb") as f:
+    f.write(data)
 ```
-Patch
+
+### Patch Raw Bytes
+If you need to apply the patch using a hex editor, here are the raw bytes:
+
 ```
-                             //
-                             // ASW1 
-                             // ASW1::800c0000-ASW1::8017fbff
-                             //
-     1::800c0000 91 20 00 c8     movh.a     a12,#0x8002
-     1::800c0004 91 00 00 4d     movh.a     a4,#0xd000
-     1::800c0008 d9 44 40 10     lea        a4,[a4]0x440
-     1::800c000c d9 cf 42 ae     lea        a15,[a12]-0x197e
-     1::800c0010 2d 0f 00 00     calli      a15
-     1::800c0014 d9 cf 66 2e     lea        a15,[a12]-0x1b5a
-     1::800c0018 3b 00 20 41     mov        d4,#0x1200
-     1::800c001c 2d 0f 00 00     calli      a15
-     1::800c0020 d9 cf a4 5e     lea        a15,[a12]-0x169c
-     1::800c0024 3b 00 20 41     mov        d4,#0x1200
-     1::800c0028 2d 0f 00 00     calli      a15
-     1::800c002c d9 cf 42 9e     lea        a15,[a12]-0x19be
-     1::800c0030 0d 00 c0 04     isync
-     1::800c0034 91 00 00 fc     movh.a     a15,#0xc000
-     1::800c0038 d9 ff 80 c7     lea        a15,[a15]0x7b00
-     1::800c003c 80 f0           mov.d      d0,a15
-     1::800c003e 0d 00 80 04     dsync
-     1::800c0042 cd 40 e2 0f     mtcr       #0xfe24,d0
-     1::800c0046 0d 00 c0 04     isync
-     1::800c004a 0d 00 c0 04     isync
-     1::800c004e d9 cf 58 9e     lea        a15,[a12]-0x19a8
-     1::800c0052 2d 0f 00 00     calli      a15
-     1::800c0056 91 20 00 28     movh.a     a2,#0x8002
-     1::800c005a 49 22 00 0a     lea        a2,[a2]0x0
-     1::800c005e 91 00 00 fd     movh.a     a15,#0xd000
-     1::800c0062 d9 ff 00 07     lea        a15,[a15]0x7000
-     1::800c0066 91 00 00 50     movh.a     a5,#0x0
-     1::800c006a d9 55 e0 f1     lea        a5,[a5]0x1fe0
-                             LAB_ASW1__800c006e                              XREF[1]:     ASW1::800c0074(j)  
-     1::800c006e 09 22 01 00     ld.b       d2,[a2+]0x1
-     1::800c0072 24 f2           st.b       [a15+],d2
-     1::800c0074 fc 5d           loop       a5,LAB_ASW1__800c006e
-     1::800c0076 91 00 00 fd     movh.a     a15,#0xd000
-     1::800c007a d9 ff 80 40     lea        a15,[a15]0x900
-     1::800c007e 49 ff 20 1a     lea        a15,[a15]0x60
-     1::800c0082 49 ff 0c 0a     lea        a15,[a15]0xc
-     1::800c0086 49 ff 0e 0a     lea        a15,[a15]0xe
-     1::800c008a 82 10           mov        d0,#0x1
-     1::800c008c 74 f0           st.w       [a15],d0
-     1::800c008e 91 00 00 fd     movh.a     a15,#0xd000
-     1::800c0092 d9 ff 80 40     lea        a15,[a15]0x900
-     1::800c0096 49 ff 20 1a     lea        a15,[a15]0x60
-     1::800c009a 49 ff 0d 0a     lea        a15,[a15]0xd
-     1::800c009e 49 ff 0c 0a     lea        a15,[a15]0xc
-     1::800c00a2 3b 20 0a 00     mov        d0,#0xa2
-     1::800c00a6 74 f0           st.w       [a15],d0
-     1::800c00a8 91 00 00 fd     movh.a     a15,#0xd000
-     1::800c00ac d9 ff 80 40     lea        a15,[a15]0x900
-     1::800c00b0 49 ff 20 1a     lea        a15,[a15]0x60
-     1::800c00b4 49 ff 0e 0a     lea        a15,[a15]0xe
-     1::800c00b8 49 ff 08 0a     lea        a15,[a15]0x8
-     1::800c00bc 3b 10 d0 00     mov        d0,#0xd01
-     1::800c00c0 74 f0           st.w       [a15],d0
-     1::800c00c2 3b 00 20 41     mov        d4,#0x1200
-     1::800c00c6 91 00 00 fd     movh.a     a15,#0xd000
-     1::800c00ca d9 ff 00 07     lea        a15,[a15]0x7000
-     1::800c00ce 2d 0f 00 00     calli      a15
-     1::800c00d2 91 a0 01 f8     movh.a     a15,#0x801a
-     1::800c00d6 d9 ff 80 00     lea        a15,[a15]0x800
-     1::800c00da d9 ff 40 00     lea        a15,[a15]0x400
-     1::800c00de d9 ff 00 c0     lea        a15,[a15]0x300
-     1::800c00e2 49 ff 00 2a     lea        a15,[a15]0x80
-     1::800c00e6 49 ff 00 4a     lea        a15,[a15]0x100
-     1::800c00ea dc 0f           ji         a15
+91 20 00 c8 91 00 00 4d d9 44 40 10 d9 cf 42 ae
+2d 0f 00 00 d9 cf 66 2e 3b 00 20 41 2d 0f 00 00
+d9 cf a4 5e 3b 00 20 41 2d 0f 00 00 d9 cf 42 9e
+0d 00 c0 04 91 00 00 fc d9 ff 80 c7 80 f0 0d 00
+80 04 cd 40 e2 0f 0d 00 c0 04 0d 00 c0 04 d9 cf
+58 9e 2d 0f 00 00 91 20 00 28 49 22 00 0a 91 00
+00 fd d9 ff 00 07 91 00 00 50 d9 55 e0 f1 09 22
+01 00 24 f2 fc 5d 91 00 00 fd d9 ff 80 40 49 ff
+20 1a 49 ff 0c 0a 49 ff 0e 0a 82 10 74 f0 91 00
+00 fd d9 ff 80 40 49 ff 20 1a 49 ff 0d 0a 49 ff
+0c 0a 3b 20 0a 00 74 f0 91 00 00 fd d9 ff 80 40
+49 ff 20 1a 49 ff 0e 0a 49 ff 08 0a 3b 10 d0 00
+74 f0 3b 00 20 41 91 00 00 fd d9 ff 00 07 2d 0f
+00 00 91 a0 01 f8 d9 ff 80 00 d9 ff 40 00 d9 ff
+00 c0 49 ff 00 2a 49 ff 00 4a dc 0f
 ```
