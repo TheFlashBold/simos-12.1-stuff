@@ -1,10 +1,15 @@
 # Simos 12.1 Sample Mode Enabler
 This patch allows bypassing RSA signature verification on Simos 12.1 ECUs by enabling "Sample Mode" in CBOOT, which disables the cryptographic validation.
+This is based on information from https://github.com/bri3d/VW_Flash for Simos 18
+
+## Addresses
+0x80000000 are flash addresses, for example 0xC0000 is the location inside the bin.
+Look here for details https://github.com/bri3d/VW_Flash/blob/master/lib/modules/simos12.py
 
 ## How It Works
 The patch has three key components:
 
-- Position: Places code at the beginning of ASW1 (0xC0000)
+- Position: Places code at the beginning of ASW1 (0x800C0000)
 - Entry Point: Modifies the ASW entry point to execute our patch first
 - Functionality: Loads CBOOT into RAM, patches it to enable Sample Mode, then executes it
 
@@ -128,7 +133,7 @@ ji         a15                // Jump to original ASW entry
 ```
 
 ### 3. Update the CRC checksum
-The ASW1 block requires valid CRC checksum. Change the value at 0xC0304:
+The ASW1 block requires valid CRC checksum. Change the value at 0x800C0304:
 
 ´´´
 0xC0304: 0b28 97db  →  b92a 3ae6
