@@ -35,7 +35,7 @@ Applying the Patch
 
 ### 1. Modify the ASW entry point
 Change the value at 0x800C0200 from 0x801AF180 to 0x800C0000:
-Copy800c0200: 80f1 1a80  →  800c 0000
+`800c0200: 80f1 1a80  →  800c 0000`
 
 ### 2. Add the patch code at 0x800C0000
 
